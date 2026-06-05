@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Alert,
   AppState,
@@ -9,40 +9,29 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { Spacing } from "@/constants/theme";
+import { useTheme } from "@/hooks/use-theme";
 import { useDriveStore } from "@/features/drive/store/driveStore";
 import { useDeviceMotion } from "@/features/drive/hooks/useDeviceMotion";
-import type { DriveEvent } from "@/lib/types";
-import { EVENT_LABELS, getSafetyRating } from "@/lib/types";
+import { useLocation } from "@/features/drive/hooks/useLocation";
+import { LiveStatus } from "@/features/drive/components/LiveStatus";
+import { EventRow } from "@/features/drive/components/EventRow";
+import { scoreColor, formatDuration } from "@/lib/display";
 import {
   saveSession,
   saveInterruptedSession,
   clearInterruptedSession,
 } from "@/lib/storage";
 
-function formatDuration(seconds: number) {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  if (h > 0)
-    return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  return `${m}:${String(s).padStart(2, "0")}`;
-}
-
-const scoreColor = (score: number) => {
-  if (score >= 90) return "#22c55e";
-  if (score >= 75) return "#3b82f6";
-  if (score >= 60) return "#f59e0b";
-  if (score >= 40) return "#f97316";
-  return "#ef4444";
-};
-
 export default function DriveScreen() {
   const router = useRouter();
+  const theme = useTheme();
   useDeviceMotion();
+  useLocation();
 
   const isActive = useDriveStore((s) => s.isActive);
   const durations = useDriveStore((s) => s.durations);
@@ -53,7 +42,7 @@ export default function DriveScreen() {
   const endDrive = useDriveStore((s) => s.endDrive);
   const startTime = useDriveStore((s) => s.startTime);
   const tick = useDriveStore((s) => s.tick);
-  const sensorData = useDriveStore((s) => s.sensorData);
+  const testMode = useDriveStore((s) => s.testMode);
 
   const [holdActive, setHoldActive] = useState(false);
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -114,90 +103,96 @@ export default function DriveScreen() {
     }
   };
 
-  const renderEvent = ({ item }: { item: DriveEvent }) => (
-    <ThemedView type="backgroundElement" style={styles.eventRow}>
-      <ThemedText type="small">{EVENT_LABELS[item.type]}</ThemedText>
-      <ThemedText type="small" style={{ opacity: 0.5 }}>
-        {new Date(item.timestamp).toLocaleTimeString()}
-      </ThemedText>
-    </ThemedView>
-  );
+  const tint = scoreColor(score);
 
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
         {sensorError && (
-          <ThemedView type="backgroundElement" style={styles.errorBanner}>
-            <ThemedText type="small">⚠ Motion sensors unavailable</ThemedText>
-          </ThemedView>
+          <View style={styles.errorBanner}>
+            <Ionicons name="warning" size={16} color="#fff" />
+            <ThemedText style={styles.errorText}>
+              Motion sensors unavailable
+            </ThemedText>
+          </View>
         )}
 
+        {testMode && (
+          <View style={styles.testBanner}>
+            <MaterialCommunityIcons name="flask-outline" size={14} color="#fff" />
+            <ThemedText style={styles.errorText}>
+              Test mode — events detected while still
+            </ThemedText>
+          </View>
+        )}
+
+        {/* Score hero */}
         <View style={styles.hero}>
-          <ThemedText type="code" style={{ opacity: 0.5 }}>
-            DRIVE TIME
-          </ThemedText>
-          <ThemedText type="title">{formatDuration(durations)}</ThemedText>
+          <View style={styles.timePill}>
+            <Ionicons name="time-outline" size={14} color={theme.textSecondary} />
+            <ThemedText type="small" style={{ color: theme.textSecondary }}>
+              {formatDuration(durations)}
+            </ThemedText>
+          </View>
 
-          <View style={{ height: Spacing.four }} />
-
-          <ThemedText type="small" style={{ opacity: 0.5 }}>
-            SCORE
-          </ThemedText>
-          <ThemedText style={[styles.scoreText, { color: scoreColor(score) }]}>
+          <ThemedText style={[styles.scoreText, { color: tint }]}>
             {score}
           </ThemedText>
-          <ThemedText style={{ color: scoreColor(score), fontWeight: "700" }}>
-            {rating}
-          </ThemedText>
+          <View style={[styles.ratingPill, { backgroundColor: tint }]}>
+            <ThemedText style={styles.ratingText}>{rating}</ThemedText>
+          </View>
+        </View>
+
+        <LiveStatus />
+
+        <View style={styles.feedHeader}>
+          <ThemedText type="smallBold">Recent events</ThemedText>
+          {events.length > 0 && (
+            <ThemedText type="small" style={{ color: theme.textSecondary }}>
+              {events.length} total
+            </ThemedText>
+          )}
         </View>
 
         <FlatList
           data={[...events].reverse().slice(0, 20)}
           keyExtractor={(e) => e.id}
-          renderItem={renderEvent}
+          renderItem={({ item }) => <EventRow event={item} />}
           style={styles.eventList}
-          contentContainerStyle={{
-            gap: Spacing.one,
-            paddingBottom: Spacing.four,
-          }}
+          contentContainerStyle={{ gap: Spacing.two, paddingBottom: Spacing.four }}
+          showsVerticalScrollIndicator={false}
           ListEmptyComponent={
-            <ThemedText
-              type="small"
-              style={{
-                textAlign: "center",
-                opacity: 0.4,
-                marginTop: Spacing.four,
-              }}
-            >
-              No events detected yet
-            </ThemedText>
+            <View style={styles.emptyState}>
+              <MaterialCommunityIcons
+                name="shield-check"
+                size={40}
+                color="#22c55e"
+              />
+              <ThemedText type="smallBold" style={{ marginTop: Spacing.two }}>
+                You&apos;re driving smoothly
+              </ThemedText>
+              <ThemedText
+                type="small"
+                style={{ color: theme.textSecondary, textAlign: "center" }}
+              >
+                Keep it up — events will appear here if anything happens.
+              </ThemedText>
+            </View>
           }
         />
-
-        {sensorData.acceleration && (
-          <ThemedView type="backgroundElement" style={styles.sensorDebug}>
-            <ThemedText type="code" style={{ fontSize: 10 }}>
-              Accel: x={sensorData.acceleration.x.toFixed(1)} y=
-              {sensorData.acceleration.y.toFixed(1)} z=
-              {sensorData.acceleration.z.toFixed(1)}
-            </ThemedText>
-            {sensorData.rotationRate && (
-              <ThemedText type="code" style={{ fontSize: 10 }}>
-                Rot: x={sensorData.rotationRate.x.toFixed(0)} y=
-                {sensorData.rotationRate.y.toFixed(0)} z=
-                {sensorData.rotationRate.z.toFixed(0)} deg/s
-              </ThemedText>
-            )}
-          </ThemedView>
-        )}
 
         <Pressable
           onPressIn={handleEndPress}
           onPressOut={handleEndRelease}
           style={[styles.endButton, holdActive && styles.endButtonHolding]}
         >
+          <Ionicons
+            name={holdActive ? "ellipsis-horizontal" : "stop-circle"}
+            size={20}
+            color="#fff"
+          />
           <ThemedText style={styles.endButtonText}>
-            {holdActive ? "Keep holding..." : "Hold to End Drive"}
+            {holdActive ? "Keep holding…" : "Hold to End Drive"}
           </ThemedText>
         </Pressable>
       </SafeAreaView>
@@ -208,34 +203,64 @@ export default function DriveScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   safeArea: { flex: 1, paddingHorizontal: Spacing.four },
-  hero: { alignItems: "center", paddingVertical: Spacing.six },
-  scoreText: { fontSize: 72, fontWeight: "800", lineHeight: 80 },
-  eventList: { flex: 1 },
-  eventRow: {
+  hero: { alignItems: "center", paddingTop: Spacing.four, paddingBottom: Spacing.three },
+  timePill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.one,
+    marginBottom: Spacing.two,
+  },
+  scoreText: { fontSize: 88, fontWeight: "900", lineHeight: 92 },
+  ratingPill: {
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.one,
+    borderRadius: 999,
+    marginTop: Spacing.two,
+  },
+  ratingText: { color: "#fff", fontWeight: "800", fontSize: 14 },
+  feedHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
-    padding: Spacing.two,
-    borderRadius: Spacing.one,
-  },
-  errorBanner: {
-    padding: Spacing.two,
-    borderRadius: Spacing.one,
     alignItems: "center",
     marginBottom: Spacing.two,
   },
-  sensorDebug: {
+  eventList: { flex: 1 },
+  emptyState: {
+    alignItems: "center",
+    paddingVertical: Spacing.six,
+    gap: Spacing.one,
+  },
+  errorBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: Spacing.two,
+    backgroundColor: "#f59e0b",
     padding: Spacing.two,
-    borderRadius: Spacing.one,
-    marginBottom: Spacing.three,
-    gap: 2,
+    borderRadius: Spacing.two,
+    marginTop: Spacing.two,
+  },
+  errorText: { color: "#fff", fontWeight: "700", fontSize: 13 },
+  testBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: Spacing.two,
+    backgroundColor: "#3c87f7",
+    padding: Spacing.two,
+    borderRadius: Spacing.two,
+    marginTop: Spacing.two,
   },
   endButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: Spacing.two,
     backgroundColor: "#ef4444",
     paddingVertical: Spacing.three,
-    borderRadius: Spacing.three,
-    alignItems: "center",
+    borderRadius: Spacing.four,
     marginBottom: Spacing.four,
   },
-  endButtonHolding: { backgroundColor: "#dc2626", opacity: 0.8 },
-  endButtonText: { color: "#ffffff", fontSize: 18, fontWeight: "700" },
+  endButtonHolding: { backgroundColor: "#dc2626", opacity: 0.85 },
+  endButtonText: { color: "#ffffff", fontSize: 17, fontWeight: "700" },
 });

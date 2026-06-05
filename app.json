@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "brakewise",
+    "name": "BrakeWise",
     "slug": "brakewise",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -34,6 +34,12 @@
             "image": "./assets/images/splash-icon.png",
             "imageWidth": 76
           }
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "BrakeWise uses your location while driving to measure speed and map your route for the trip summary."
         }
       ]
     ],

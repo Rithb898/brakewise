@@ -6,16 +6,21 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { DeviceMotion } from "expo-sensors";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { Spacing } from "@/constants/theme";
+import { useTheme } from "@/hooks/use-theme";
 import { useDriveStore } from "@/features/drive/store/driveStore";
 import type { DriveSession } from "@/lib/types";
+import { scoreColor, formatDuration, RATING_ICONS } from "@/lib/display";
 import {
   getSessions,
   getInterruptedSession,
@@ -24,24 +29,29 @@ import {
 
 export default function HomeScreen() {
   const router = useRouter();
+  const theme = useTheme();
   const startDrive = useDriveStore((s) => s.startDrive);
   const isActive = useDriveStore((s) => s.isActive);
+  const testMode = useDriveStore((s) => s.testMode);
+  const setTestMode = useDriveStore((s) => s.setTestMode);
   const [lastSession, setLastSession] = useState<DriveSession | null>(null);
   const [recentSessions, setRecentSessions] = useState<DriveSession[]>([]);
   const [loading, setLoading] = useState(true);
 
   const loadSessions = useCallback(async () => {
-    setLoading(true);
     const sessions = await getSessions();
     sessions.sort((a, b) => b.startTime - a.startTime);
-    if (sessions.length > 0) setLastSession(sessions[0]);
+    setLastSession(sessions[0] ?? null);
     setRecentSessions(sessions.slice(0, 3));
     setLoading(false);
   }, []);
 
-  useEffect(() => {
-    loadSessions();
-  }, [loadSessions]);
+  // Refresh whenever the screen regains focus (e.g. after ending a drive).
+  useFocusEffect(
+    useCallback(() => {
+      loadSessions();
+    }, [loadSessions]),
+  );
 
   useEffect(() => {
     (async () => {
@@ -57,9 +67,9 @@ export default function HomeScreen() {
   }, [router]);
 
   const handleStart = async () => {
-    if (Platform.OS === 'android') {
+    if (Platform.OS === "android") {
       startDrive();
-      router.push('/drive');
+      router.push("/drive");
       return;
     }
 
@@ -76,24 +86,10 @@ export default function HomeScreen() {
     } else {
       Alert.alert(
         "Motion Permission Required",
-        "SafeDrive needs motion sensors to detect driving events. Please enable Motion & Fitness in your device settings.",
+        "BrakeWise needs motion sensors to detect driving events. Please enable Motion & Fitness in your device settings.",
         [{ text: "OK" }],
       );
     }
-  };
-
-  const formatDuration = (seconds: number) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m}m ${s}s`;
-  };
-
-  const scoreColor = (score: number) => {
-    if (score >= 90) return "#22c55e";
-    if (score >= 75) return "#3b82f6";
-    if (score >= 60) return "#f59e0b";
-    if (score >= 40) return "#f97316";
-    return "#ef4444";
   };
 
   return (
@@ -103,10 +99,22 @@ export default function HomeScreen() {
           contentContainerStyle={styles.scroll}
           showsVerticalScrollIndicator={false}
         >
-          <ThemedText type="title" style={styles.logo}>
-            SafeDrive
-          </ThemedText>
+          {/* Brand */}
+          <View style={styles.brand}>
+            <View style={styles.brandRow}>
+              <MaterialCommunityIcons
+                name="steering"
+                size={30}
+                color="#3c87f7"
+              />
+              <ThemedText style={styles.logo}>BrakeWise</ThemedText>
+            </View>
+            <ThemedText type="small" style={{ color: theme.textSecondary }}>
+              Drive safe. Score high.
+            </ThemedText>
+          </View>
 
+          {/* Last drive */}
           {lastSession && (
             <Pressable
               onPress={() =>
@@ -117,36 +125,84 @@ export default function HomeScreen() {
               }
             >
               <ThemedView type="backgroundElement" style={styles.lastDriveCard}>
-                <ThemedText type="small">Last Drive</ThemedText>
+                <View style={{ flex: 1, gap: 2 }}>
+                  <ThemedText type="small" style={{ color: theme.textSecondary }}>
+                    Your last drive
+                  </ThemedText>
+                  <View style={styles.ratingLine}>
+                    <Ionicons
+                      name={RATING_ICONS[lastSession.rating]}
+                      size={18}
+                      color={scoreColor(lastSession.score)}
+                    />
+                    <ThemedText
+                      type="smallBold"
+                      style={{ color: scoreColor(lastSession.score) }}
+                    >
+                      {lastSession.rating}
+                    </ThemedText>
+                  </View>
+                  <ThemedText type="small" style={{ color: theme.textSecondary }}>
+                    {formatDuration(lastSession.duration)} ·{" "}
+                    {lastSession.events.length} events
+                  </ThemedText>
+                </View>
                 <ThemedText
-                  type="subtitle"
-                  style={{ color: scoreColor(lastSession.score) }}
+                  style={[styles.lastScore, { color: scoreColor(lastSession.score) }]}
                 >
-                  {lastSession.score} · {lastSession.rating}
+                  {lastSession.score}
                 </ThemedText>
-                <ThemedText type="small">
-                  {formatDuration(lastSession.duration)} ·{" "}
-                  {lastSession.events.length} events
-                </ThemedText>
+                <Ionicons
+                  name="chevron-forward"
+                  size={20}
+                  color={theme.textSecondary}
+                />
               </ThemedView>
             </Pressable>
           )}
 
+          {/* Start button */}
           <Pressable
             style={[styles.startButton, isActive && styles.startButtonDisabled]}
             onPress={handleStart}
             disabled={isActive}
           >
+            <Ionicons name="play" size={22} color="#fff" />
             <ThemedText style={styles.startButtonText}>
-              {isActive ? "Drive in progress..." : "Start Drive"}
+              {isActive ? "Drive in progress…" : "Start Drive"}
             </ThemedText>
           </Pressable>
 
-          {recentSessions.length > 0 && (
-            <>
-              <ThemedText type="subtitle" style={styles.sectionTitle}>
-                Recent Drives
+          {/* Test mode */}
+          <ThemedView type="backgroundElement" style={styles.testRow}>
+            <MaterialCommunityIcons
+              name="flask-outline"
+              size={20}
+              color={theme.textSecondary}
+            />
+            <View style={{ flex: 1 }}>
+              <ThemedText type="smallBold">Test mode</ThemedText>
+              <ThemedText type="small" style={{ color: theme.textSecondary }}>
+                Detect events while still — for trying it out without driving.
               </ThemedText>
+            </View>
+            <Switch
+              value={testMode}
+              onValueChange={setTestMode}
+              trackColor={{ true: "#3c87f7" }}
+            />
+          </ThemedView>
+
+          {/* Recent */}
+          {recentSessions.length > 0 && (
+            <View style={{ gap: Spacing.two }}>
+              <View style={styles.sectionHeader}>
+                <ThemedText type="smallBold">Recent drives</ThemedText>
+                <Pressable onPress={() => router.push("/history")}>
+                  <ThemedText type="linkPrimary">View all →</ThemedText>
+                </Pressable>
+              </View>
+
               {recentSessions.map((s) => (
                 <Pressable
                   key={s.id}
@@ -157,49 +213,59 @@ export default function HomeScreen() {
                     })
                   }
                 >
-                  <ThemedView
-                    type="backgroundElement"
-                    style={styles.sessionRow}
-                  >
-                    <ThemedText
-                      style={{ color: scoreColor(s.score), fontWeight: "700" }}
+                  <ThemedView type="backgroundElement" style={styles.sessionRow}>
+                    <View
+                      style={[
+                        styles.scoreChip,
+                        { backgroundColor: scoreColor(s.score) },
+                      ]}
                     >
-                      {s.score}
-                    </ThemedText>
-                    <ThemedText type="small">{s.rating}</ThemedText>
-                    <ThemedText type="small">
-                      {formatDuration(s.duration)}
-                    </ThemedText>
-                    <ThemedText type="small">
-                      {s.events.length} events
-                    </ThemedText>
+                      <ThemedText style={styles.scoreChipText}>
+                        {s.score}
+                      </ThemedText>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <ThemedText type="smallBold">{s.rating}</ThemedText>
+                      <ThemedText
+                        type="small"
+                        style={{ color: theme.textSecondary }}
+                      >
+                        {new Date(s.startTime).toLocaleDateString()} ·{" "}
+                        {formatDuration(s.duration)} · {s.events.length} events
+                      </ThemedText>
+                    </View>
+                    <Ionicons
+                      name="chevron-forward"
+                      size={18}
+                      color={theme.textSecondary}
+                    />
                   </ThemedView>
                 </Pressable>
               ))}
-              <Pressable onPress={() => router.push("/history")}>
-                <ThemedText
-                  type="linkPrimary"
-                  style={{ textAlign: "center", marginTop: Spacing.two }}
-                >
-                  View All Drives →
-                </ThemedText>
-              </Pressable>
-            </>
+            </View>
           )}
 
-          {!loading && recentSessions.length === 0 && !lastSession && (
+          {!loading && recentSessions.length === 0 && (
             <ThemedView type="backgroundElement" style={styles.emptyState}>
-              <ThemedText style={{ textAlign: "center", opacity: 0.6 }}>
-                No drives yet.{"\n"}Tap Start Drive to begin your first session.
+              <MaterialCommunityIcons
+                name="car-outline"
+                size={44}
+                color={theme.textSecondary}
+              />
+              <ThemedText type="smallBold" style={{ marginTop: Spacing.two }}>
+                No drives yet
+              </ThemedText>
+              <ThemedText
+                type="small"
+                style={{ textAlign: "center", color: theme.textSecondary }}
+              >
+                Tap Start Drive to record your first session.
               </ThemedText>
             </ThemedView>
           )}
 
           {loading && (
-            <ActivityIndicator
-              size="large"
-              style={{ marginTop: Spacing.four }}
-            />
+            <ActivityIndicator size="large" style={{ marginTop: Spacing.four }} />
           )}
         </ScrollView>
       </SafeAreaView>
@@ -215,31 +281,60 @@ const styles = StyleSheet.create({
     gap: Spacing.four,
     paddingBottom: Spacing.six,
   },
-  logo: { textAlign: "center" },
+  brand: { alignItems: "center", gap: Spacing.one },
+  brandRow: { flexDirection: "row", alignItems: "center", gap: Spacing.two },
+  logo: { fontSize: 34, lineHeight: 40, fontWeight: "800" },
   lastDriveCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.three,
     padding: Spacing.four,
-    borderRadius: Spacing.three,
-    gap: Spacing.one,
+    borderRadius: Spacing.four,
   },
+  ratingLine: { flexDirection: "row", alignItems: "center", gap: Spacing.one },
+  lastScore: { fontSize: 40, lineHeight: 44, fontWeight: "900" },
   startButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: Spacing.two,
     backgroundColor: "#3c87f7",
     paddingVertical: Spacing.three,
-    borderRadius: Spacing.three,
-    alignItems: "center",
+    borderRadius: Spacing.four,
   },
   startButtonDisabled: { opacity: 0.5 },
-  startButtonText: { color: "#ffffff", fontSize: 20, fontWeight: "700" },
-  sectionTitle: { marginTop: Spacing.two },
-  sessionRow: {
+  startButtonText: { color: "#ffffff", fontSize: 18, fontWeight: "700" },
+  testRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.three,
+    padding: Spacing.three,
+    borderRadius: Spacing.three,
+  },
+  sectionHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    padding: Spacing.three,
-    borderRadius: Spacing.two,
   },
-  emptyState: {
-    padding: Spacing.four,
+  sessionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.three,
+    padding: Spacing.three,
     borderRadius: Spacing.three,
-    marginTop: Spacing.four,
+  },
+  scoreChip: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  scoreChipText: { color: "#fff", fontWeight: "800", fontSize: 16 },
+  emptyState: {
+    padding: Spacing.five,
+    borderRadius: Spacing.four,
+    alignItems: "center",
+    gap: 2,
   },
 });

@@ -53,17 +53,30 @@ function stddev(arr: number[]): number {
   return Math.sqrt(variance);
 }
 
+export interface DetectedEvent {
+  type: EventType;
+  /** Raw magnitude that triggered the event (for display in the timeline). */
+  value: number;
+  /** Penalty multiplier: 1.0 at threshold, scaling up to a 2x cap. */
+  severity: number;
+}
+
+// Clamp the over-threshold ratio into a sane penalty multiplier.
+function severityFor(value: number, threshold: number): number {
+  const ratio = Math.abs(value) / Math.abs(threshold);
+  return Math.min(2, Math.max(1, ratio));
+}
+
 export function detectEvents(
   buffer: RollingBuffer,
   thresholds: ThresholdConfig,
   raw: SensorData,
-): EventType[] {
+): DetectedEvent[] {
   if (!raw.acceleration || !raw.rotationRate) return [];
-  const events: EventType[] = [];
+  const events: DetectedEvent[] = [];
 
   const az = avg(buffer.accelZ);
   const ax = avg(buffer.accelX);
-  const ay = avg(buffer.accelY);
   const rotMag = mag(avg(buffer.rotX), avg(buffer.rotY), avg(buffer.rotZ));
   const accelMag = mag(
     avg(buffer.accelX),
@@ -77,16 +90,42 @@ export function detectEvents(
   );
 
   if (buffer.accelZ.length >= buffer.size) {
-    if (az < thresholds.harshBraking) events.push(EventType.HarshBraking);
+    if (az < thresholds.harshBraking)
+      events.push({
+        type: EventType.HarshBraking,
+        value: az,
+        severity: severityFor(az, thresholds.harshBraking),
+      });
     if (az > thresholds.harshAcceleration)
-      events.push(EventType.HarshAcceleration);
-    if (Math.abs(ax) > thresholds.sharpTurn) events.push(EventType.SharpTurn);
+      events.push({
+        type: EventType.HarshAcceleration,
+        value: az,
+        severity: severityFor(az, thresholds.harshAcceleration),
+      });
+    if (Math.abs(ax) > thresholds.sharpTurn)
+      events.push({
+        type: EventType.SharpTurn,
+        value: ax,
+        severity: severityFor(ax, thresholds.sharpTurn),
+      });
     if (rotMag > thresholds.aggressiveSteering)
-      events.push(EventType.AggressiveSteering);
+      events.push({
+        type: EventType.AggressiveSteering,
+        value: rotMag,
+        severity: severityFor(rotMag, thresholds.aggressiveSteering),
+      });
     if (accelMag > thresholds.excessiveMovement)
-      events.push(EventType.ExcessiveMovement);
+      events.push({
+        type: EventType.ExcessiveMovement,
+        value: accelMag,
+        severity: severityFor(accelMag, thresholds.excessiveMovement),
+      });
     if (accelStd > thresholds.phoneHandling)
-      events.push(EventType.PhoneHandling);
+      events.push({
+        type: EventType.PhoneHandling,
+        value: accelStd,
+        severity: severityFor(accelStd, thresholds.phoneHandling),
+      });
   }
 
   return events;

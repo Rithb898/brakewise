@@ -37,22 +37,22 @@ export function useDeviceMotion() {
       setSensorData(sensorData);
       pushToBuffer(bufferRef.current, sensorData);
 
+      // Speed-gate: ignore events while parked/crawling. Only applies when GPS
+      // reports a speed — if speed is unknown we fall back to motion-only.
+      // Test mode bypasses the gate so events fire while stationary.
+      const { speed, testMode } = useDriveStore.getState();
+      if (!testMode && speed != null && speed < thresholds.minSpeedForEvents)
+        return;
+
       const detected = detectEvents(bufferRef.current, thresholds, sensorData);
-      for (const eventType of detected) {
-        if (!isOnCooldown(eventType)) {
-          addEvent(eventType, 0);
+      for (const { type, value, severity } of detected) {
+        if (!isOnCooldown(type)) {
+          addEvent(type, value, severity);
         }
       }
     });
     setListening(true);
-  }, [
-    isActive,
-    setSensorData,
-    setListening,
-    thresholds,
-    addEvent,
-    isOnCooldown,
-  ]);
+  }, [setSensorData, setListening, thresholds, addEvent, isOnCooldown]);
 
   const stopSensors = useCallback(() => {
     subscriptionRef.current?.remove();
