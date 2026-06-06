@@ -1,56 +1,138 @@
-# Welcome to your Expo app 👋
+# BrakeWise
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Expo/React Native driving telematics app. Tracks driving behavior via phone sensors, scores trips, persists history.
 
-## Get started
+## Screenshots
 
-1. Install dependencies
+<p align="center">
+  <img src="./assets/screenshoots/WhatsApp%20Image%202026-06-06%20at%208.35.16%20PM.jpeg" width="250" />
+  <img src="./assets/screenshoots/WhatsApp%20Image%202026-06-06%20at%208.35.16%20PM%20(1).jpeg" width="250" />
+  <img src="./assets/screenshoots/WhatsApp%20Image%202026-06-06%20at%208.35.15%20PM.jpeg" width="250" />
+</p>
 
-   ```bash
-   npm install
-   ```
+## Stack
 
-2. Start the app
+| Layer | Tech |
+|-------|------|
+| Runtime | Expo 55, React Native 0.83, React 19 |
+| Router | Expo Router (file-based, typed routes) |
+| State | Zustand (sliced: sensor/location/event/score/session) |
+| Sensors | `expo-sensors` DeviceMotion @ 10Hz |
+| GPS | `expo-location` watch (1Hz / 5m) |
+| Storage | AsyncStorage (write on drive end) |
+| Charts | react-native-gifted-charts |
+| UI | expo-glass-effect, expo-linear-gradient, expo-symbols |
+| Lang | TypeScript 5.9 |
 
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+## Run
 
 ```bash
-npm run reset-project
+npm install
+npx expo start
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+Scripts: `npm run android` · `npm run ios` · `npm run web` · `npm run lint`
 
-### Other setup steps
+Requires location permission on first Start Drive. Build target: Expo SDK 55.
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+## Pipeline
 
-## Learn more
+```
+DeviceMotion 10Hz            GPS watch 1Hz/5m
+  ↓                              ↓
+5-sample rolling avg          push RoutePoint
+  ↓                              ↓
+speed gate (≥10 km/h) ←─────────┘
+  ↓
+threshold check (6 event types)
+  ↓
+3s cooldown gate per type
+  ↓
+fire event (tagged lat/lng) → deduct round(base × severity)
+```
 
-To learn more about developing your project with Expo, look at the following resources:
+Sensor display split into throttled `SensorDebug` so 10Hz updates don't re-render score/timer/event list.
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+## Events & Penalties
 
-## Join the community
+| Event | Trigger (5-sample avg) | Base |
+|-------|------------------------|------|
+| Harsh Braking | `accel.z < -4.0` m/s² | -5 |
+| Harsh Acceleration | `accel.z > 3.5` m/s² | -5 |
+| Sharp Turn | `|accel.x| > 3.0` m/s² | -3 |
+| Aggressive Steering | rotation mag > 150 deg/s | -5 |
+| Excessive Movement | accel mag > 6.0 m/s² | -8 |
+| Phone Handling | stddev(accel) > 1.5 | -10 |
 
-Join our community of developers creating universal apps.
+Acceleration is gravity-removed linear (m/s²). Severity scales 1→2× past threshold. Score starts at 100, floored at 0.
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+## Rating
+
+| Score | Rating |
+|-------|--------|
+| 90+ | Excellent |
+| 75-89 | Good |
+| 60-74 | Fair |
+| 40-59 | Poor |
+| <40 | Dangerous |
+
+## Routes
+
+| Path | Screen |
+|------|--------|
+| `/` | Home: last drive card, Start Drive, recent sessions |
+| `/drive` | Live: timer, score, event feed, hold-to-end, debug |
+| `/summary/[id]` | Result: hero score, bar chart, event timeline |
+| `/history` | Dashboard: stat cards, trend line, session list |
+
+## Persisted Session Shape
+
+```ts
+DriveSession {
+  id, startTime, endTime, duration,
+  score, rating,
+  events: DriveEvent[],      // tagged w/ lat/lng + penalty
+  route: RoutePoint[],       // GPS breadcrumbs
+  distanceKm,                // haversine
+  maxSpeedKmh
+}
+```
+
+Derived rates (events/10min, events/100km, avgSpeed) computed via `driveRates()` for cross-trip comparison.
+
+## Folder Structure
+
+```
+src/
+  app/                       # Expo Router screens
+    _layout.tsx, index.tsx, drive.tsx, history.tsx
+    summary/[id].tsx
+  features/
+    drive/
+      hooks/                 # useDeviceMotion, useLocation
+      store/driveStore.ts    # Zustand sliced store
+      utils/                 # scoring, thresholds, geo
+      components/            # EventRow, LiveStatus
+  lib/                       # storage, types, display
+  components/                # themed-text, themed-view
+  hooks/                     # use-color-scheme, use-theme
+  constants/theme.ts
+```
+
+## Storage Keys
+
+- `safedrive_sessions` — array of completed `DriveSession`
+- `safedrive_interrupted` — partial session saved on `AppState` inactive (recovered on next launch)
+
+## Edge Cases
+
+- Sensor failure → banner, drive continues
+- App killed mid-drive → partial save, recover on launch
+- NaN/Inf filtering in rolling buffer
+- AsyncStorage write failure → toast + retry
+- Permission denied → settings link, motion-only fallback (no speed gate)
+- `testMode` flag bypasses speed gate for demos without a vehicle
+
+## Config
+
+Thresholds live in `src/lib/types.ts` (`DEFAULT_THRESHOLDS`). Override per-session via `setThresholds()`. See `PLAN.md` for full architecture rationale.
